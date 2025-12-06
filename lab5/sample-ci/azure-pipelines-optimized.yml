@@ -1,103 +1,82 @@
-trigger:
-  branches:
-    include:
-    - main
+name: CI - Optimized
 
-pool:
-  name: 'Default'  # Self-hosted agent (MS-hosted wymaga approval dla free tier)
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
-stages:
-- stage: Build
-  displayName: 'Build and Test'
-  jobs:
-  - job: Backend
-    displayName: 'Backend (.NET)'
+jobs:
+  backend:
+    name: Backend (.NET)
+    runs-on: ubuntu-latest
+
     steps:
-    - task: UseDotNet@2
-      displayName: 'Install .NET 8 SDK'
-      inputs:
-        packageType: 'sdk'
-        version: '8.x'
-    
-    - task: Cache@2
-      displayName: 'Cache NuGet packages'
-      inputs:
-        key: 'nuget | "$(Agent.OS)" | lab5/sample-ci/backend/**/packages.lock.json,lab5/sample-ci/backend/**/*.csproj'
-        path: $(Pipeline.Workspace)/.nuget/packages
-        restoreKeys: |
-          nuget | "$(Agent.OS)"
-    
-    - script: |
-        cd lab5/sample-ci/backend
-        dotnet restore
-      displayName: 'Restore dependencies'
-    
-    - script: |
-        cd lab5/sample-ci/backend
-        dotnet build --configuration Release --no-restore
-      displayName: 'Build application'
-    
-    - script: |
-        cd lab5/sample-ci/backend
-        dotnet test ProductApi.Tests/ProductApi.Tests.csproj \
-          --configuration Release \
-          --no-build \
-          --no-restore \
-          --logger trx
-      displayName: 'Run unit tests'
-    
-    - task: PublishTestResults@2
-      displayName: 'Publish test results'
-      condition: always()
-      inputs:
-        testResultsFormat: 'VSTest'
-        testResultsFiles: '**/TestResults/*.trx'
-    
-    - script: |
-        cd lab5/sample-ci/backend
-        dotnet publish --configuration Release --no-build --output $(Build.ArtifactStagingDirectory)/backend
-      displayName: 'Publish artifacts'
-    
-    - task: PublishBuildArtifacts@1
-      displayName: 'Upload artifacts'
-      inputs:
-        PathtoPublish: '$(Build.ArtifactStagingDirectory)/backend'
-        ArtifactName: 'backend'
+      - name: Checkout
+        uses: actions/checkout@v4
 
-  - job: Frontend
-    displayName: 'Frontend (Node.js)'
-    dependsOn: Backend
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('lab5/sample-ci/backend/**/*.csproj') }}
+
+      - name: Restore dependencies
+        working-directory: lab5/sample-ci/backend
+        run: dotnet restore
+
+      - name: Build application
+        working-directory: lab5/sample-ci/backend
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Run unit tests
+        working-directory: lab5/sample-ci/backend
+        run: dotnet test --no-build --configuration Release --logger trx
+
+      - name: Publish artifacts
+        working-directory: lab5/sample-ci/backend
+        run: dotnet publish --no-build --configuration Release --output ./publish
+
+      - name: Upload backend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend
+          path: lab5/sample-ci/backend/publish
+
+  frontend:
+    name: Frontend (Node.js)
+    runs-on: ubuntu-latest
+
     steps:
-    - task: NodeTool@0
-      displayName: 'Install Node.js'
-      inputs:
-        versionSpec: '20.x'
-    
-    - task: Cache@2
-      displayName: 'Cache node_modules'
-      inputs:
-        key: 'npm | "$(Agent.OS)" | lab5/sample-ci/frontend/package-lock.json'
-        path: lab5/sample-ci/frontend/node_modules
-        restoreKeys: |
-          npm | "$(Agent.OS)"
-    
-    - script: |
-        cd lab5/sample-ci/frontend
-        npm ci
-      displayName: 'Install dependencies'
-    
-    - script: |
-        cd lab5/sample-ci/frontend
-        npm test
-      displayName: 'Run tests'
-    
-    - script: |
-        cd lab5/sample-ci/frontend
-        npm run build
-      displayName: 'Build frontend'
-    
-    - task: PublishBuildArtifacts@1
-      displayName: 'Upload artifacts'
-      inputs:
-        PathtoPublish: 'lab5/sample-ci/frontend/dist'
-        ArtifactName: 'frontend'
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: lab5/sample-ci/frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: lab5/sample-ci/frontend
+        run: npm ci
+
+      - name: Run tests
+        working-directory: lab5/sample-ci/frontend
+        run: npm test
+
+      - name: Build frontend
+        working-directory: lab5/sample-ci/frontend
+        run: npm run build
+
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend
+          path: lab5/sample-ci/frontend/dist
